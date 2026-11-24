@@ -11,6 +11,11 @@ Couplings (how targets are attached to z):
           gauss: squared Euclidean to one-hot(x);  code/onehot: Hamming(s, x) (plan's "Hamming OT").
   ode     gauss only: x = argmax of the ODE of a one-hot flow-matching model started at z.
   vae     gauss only: z ~ q(z | x) of a VAE with factorized decoder (Coupling Models Stage A, simplified).
+Knothe-Rosenblatt cells (coupling `kr`: x_i = inverse CDF of p(x_i | x_<i) at u_i, u in [0,1]^6):
+  unif    u ~ U[0,1]^6 continuous.
+  quant   u on a grid of Q levels per dim (ordered discrete source).
+  shuf    the same grid and the same coupling, but G sees the levels permuted per dim. The source
+          law is identical to `quant`; only the alignment between source order and coupling differs.
 """
 import json
 import math
@@ -29,9 +34,12 @@ from model import MLP  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "results" / "e4"
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
-DZ, M, FRAC_TRAIN = D.L * D.V, 4096, 0.8
+DZ, M, FRAC_TRAIN, Q = D.L * D.V, 4096, 0.8, 64
 CELLS = [("gauss", "random"), ("gauss", "ot"), ("gauss", "ode"), ("gauss", "vae"),
-         ("code", "random"), ("code", "ot"), ("onehot", "random"), ("onehot", "ot")]
+         ("code", "random"), ("code", "ot"), ("onehot", "random"), ("onehot", "ot"),
+         ("unif", "kr"), ("quant", "kr"), ("shuf", "kr")]
+IN_DIM = {"gauss": DZ, "code": DZ, "onehot": M, "unif": D.L, "quant": D.L, "shuf": D.L}
+SHUF = torch.stack([torch.randperm(Q, generator=torch.Generator().manual_seed(i)) for i in range(D.L)])
 
 
 def onehot_x(x):
@@ -107,12 +115,41 @@ def all_codes():
     return D.STATES.to(DEV)  # symbol k <-> string s_k in {0..3}^6
 
 
-def source_input(src, idx_or_z):
+def grid_u(idx):
+    return (idx + 0.5) / Q
+
+
+def source_input(src, z):
+    """What G sees. z: gauss/unif floats, code/onehot symbol ids, quant/shuf (n, L) level ids."""
     if src == "gauss":
-        return idx_or_z
+        return z
     if src == "code":
-        return onehot_x(all_codes()[idx_or_z])
-    return torch.nn.functional.one_hot(idx_or_z, M).float()
+        return onehot_x(all_codes()[z])
+    if src == "onehot":
+        return torch.nn.functional.one_hot(z, M).float()
+    if src == "shuf":
+        z = SHUF.to(DEV).T[z, torch.arange(D.L, device=DEV)]  # level j of dim i -> SHUF[i, j]
+    u = z if src == "unif" else grid_u(z)
+    return (u - 0.5) * 12 ** 0.5
+
+
+def sample_z(src, n, g):
+    if src == "gauss":
+        return torch.randn(n, DZ, generator=g, device=DEV)
+    if src == "unif":
+        return torch.rand(n, D.L, generator=g, device=DEV)
+    return torch.randint(Q, (n, D.L), generator=g, device=DEV)
+
+
+def kr_decode(p, u):
+    """Knothe-Rosenblatt / autoregressive inverse-CDF map [0,1]^L -> V^L for the exact p."""
+    pt, x = p.reshape([D.V] * D.L), torch.zeros(len(u), D.L, dtype=torch.long, device=DEV)
+    for i in range(D.L):
+        m = pt.sum(list(range(i + 1, D.L))) if i < D.L - 1 else pt  # p(x_<=i), shape V^(i+1)
+        cond = m[tuple(x[:, j] for j in range(i))]                   # (n, V) unnormalized
+        cdf = (cond / cond.sum(-1, keepdim=True)).cumsum(-1)
+        x[:, i] = torch.searchsorted(cdf, u[:, i:i + 1].double()).clamp_max(D.V - 1)[:, 0]
+    return x
 
 
 def assign(cost):
@@ -122,12 +159,12 @@ def assign(cost):
 
 
 def make_pairs(src, coupling, p, seed, cache):
-    """Returns (z_train, x_train, z_test, x_test, sym_all or None)."""
+    """Returns (z_train, x_train, z_test, x_test)."""
     g = torch.Generator(DEV).manual_seed(seed)
     S = D.STATES.to(DEV)
     x = S[torch.multinomial(p, M, replacement=True, generator=g)]
     if src == "gauss":
-        z = torch.randn(M, DZ, generator=g, device=DEV)
+        z = sample_z(src, M, g)
         if coupling == "ot":
             x = x[assign(torch.cdist(z, onehot_x(x)).pow(2))]
         elif coupling == "ode":
@@ -136,6 +173,9 @@ def make_pairs(src, coupling, p, seed, cache):
             with torch.no_grad():
                 mu, logs = cache["vae"].encode(x)
                 z = mu + logs.exp() * torch.randn(mu.shape, generator=g, device=DEV)
+    elif coupling == "kr":
+        z = sample_z(src, M, g)
+        x = kr_decode(p, z if src == "unif" else grid_u(z))
     else:
         z = torch.randperm(M, generator=g, device=DEV)  # symbol indices
         if coupling == "ot":
@@ -155,11 +195,10 @@ def evaluate(G, src, p, z_te, x_te, z_tr, x_tr, seed):
     out["train_tok_acc"], out["train_seq_acc"] = acc(z_tr, x_tr)
     out["test_tok_acc"], out["test_seq_acc"] = acc(z_te, x_te)
     out["test_ce"] = regression_ce(G(source_input(src, z_te)), x_te).item()
-    if src == "gauss":
-        g = torch.Generator(DEV).manual_seed(10_000 + seed)
-        z_dep = torch.randn(2**16, DZ, generator=g, device=DEV)
-    else:
+    if src in ("code", "onehot"):
         z_dep = source_input(src, torch.arange(M, device=DEV))
+    else:
+        z_dep = source_input(src, sample_z(src, 2**16, torch.Generator(DEV).manual_seed(10_000 + seed)))
     out.update(metrics(p, log_marginal(G, z_dep)))
     return out
 
@@ -187,7 +226,7 @@ def main(families=("mix16", "markov"), seeds=(0, 1, 2), g_steps=4000):
                     cache["vae"] = train_vae(p, seed)
                 z_tr, x_tr, z_te, x_te = make_pairs(src, coupling, p, seed, cache)
                 torch.manual_seed(seed)
-                G = MLP(DZ if src != "onehot" else M).to(DEV)
+                G = MLP(IN_DIM[src]).to(DEV)
                 fit(G, source_input(src, z_tr), x_tr, g_steps,
                     loss_fn=lambda G, z, x: regression_ce(G(z), x))
                 res = {"family": fam, "source": src, "coupling": coupling, "seed": seed,
