@@ -52,16 +52,22 @@ def markov_chain(alpha=0.5, seed=0):
     return logp.exp()
 
 
-def codebook(r, seed=0):
-    """Uniform over r distinct random sequences: needs exactly log2 r bits of shared randomness."""
+def codebook(r, seed=0, zipf=False):
+    """r random codewords of the parity code sum(x) = 0 mod V (min Hamming distance 2), uniform or
+    with Zipf weights 1/rank. Distance 2 makes the nonnegative rank exactly r: a product component
+    covering two codewords would also cover a non-codeword at distance 1 from one of them."""
     g = torch.Generator().manual_seed(seed)
+    code = torch.nonzero(STATES.sum(1) % V == 0)[:, 0]
+    w = 1 / torch.arange(1, r + 1, dtype=DT) if zipf else torch.ones(r, dtype=DT)
     p = torch.zeros(len(STATES), dtype=DT)
-    p[torch.randperm(len(STATES), generator=g)[:r]] = 1 / r
+    p[code[torch.randperm(len(code), generator=g)[:r]]] = w / w.sum()
     return p
 
 
 def make(family, seed=0):
-    """'mix<r>' (e.g. 'mix16'), 'code<r>', 'copy', or 'markov'."""
+    """'mix<r>' (e.g. 'mix16'), 'code<r>', 'zipf<r>' (Zipf-weighted code), 'copy', or 'markov'."""
+    if family.startswith("zipf"):
+        return codebook(int(family[4:]), seed=seed, zipf=True)
     if family.startswith("code"):
         return codebook(int(family[4:]), seed=seed)
     if family.startswith("mix"):

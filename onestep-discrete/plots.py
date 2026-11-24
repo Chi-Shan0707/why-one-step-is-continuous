@@ -23,6 +23,11 @@ plt.rcParams.update({
     "lines.markersize": 6, "font.size": 10, "legend.frameon": False, "axes.titlesize": 11,
 })
 FLOOR = 1e-4  # KL values below this are drawn at the floor on log axes
+FLOOR_NOTE = "KL < 1e-4 drawn at 1e-4"
+
+
+def fl(v):
+    return np.maximum(v, FLOOR)
 
 
 def load(pattern):
@@ -48,7 +53,7 @@ def fig_e1():
         ax.plot(k, kl, "-o", color=c, label=f"{fam}  (TC = {r['tc']:.2f})")
         ax.axvline(int(fam[3:]), color=c, lw=1, ls=":")
     ax.set(xscale="log", yscale="log", xlabel="mixture components k (EM, best of 10)",
-           ylabel="KL(p || p_k)  [nats]", title="E1: KL hits 0 at k = r (dotted)")
+           ylabel="KL(p || p_k)  [nats]", title=f"E1: EM's KL vanishes at k ~ r (dotted: k = r; {FLOOR_NOTE})")
     ax.set_xticks([1, 2, 4, 8, 16, 32, 64, 128], [1, 2, 4, 8, 16, 32, 64, 128])
     ax.legend()
     save(fig, "e1_rank.png")
@@ -62,13 +67,13 @@ def fig_e2():
         if not rows:
             continue
         ks = [x["k"] for x in rows[0]["rows"]]
-        m = np.mean([[max(x["kl_model"], FLOOR) for x in r["rows"]] for r in rows], 0)
+        m = fl(np.mean([[x["kl_model"] for x in r["rows"]] for r in rows], 0))
         o = [max(x["kl_oracle"], FLOOR) for x in rows[0]["rows"]]
         ax.plot(ks, m, "-o", color=c, label=f"{fam} MDM (TC = {rows[0]['tc']:.2f})")
         ax.plot(ks, o, "--", color=c, lw=1.2, alpha=0.8)
     ax.plot([], [], "--", color=INK2, lw=1.2, label="exact conditionals (oracle)")
     ax.set(yscale="log", xlabel="sampling steps k (L/k tokens per step)", ylabel="KL(p || p_k)  [nats]",
-           title="E2: committed tokens act as shared randomness")
+           title=f"E2: committed tokens act as shared randomness ({FLOOR_NOTE})")
     ax.set_xticks([1, 2, 3, 6])
     ax.legend()
     save(fig, "e2_steps.png")
@@ -97,6 +102,8 @@ def fig_e3():
     panels = [("mix16_pop", "mix16, population objective"), ("mix16_500", "mix16, n = 500 samples"),
               ("mix16_5000", "mix16, n = 5000 samples"), ("markov_pop", "Markov, population objective")]
     panels = [p for p in panels if list(R.glob(f"e3/{p[0]}_*.json"))]
+    if not panels:
+        return
     fig, axes = plt.subplots(1, len(panels), figsize=(4.6 * len(panels), 4), squeeze=False)
     for ax, (prefix, title) in zip(axes[0], panels):
         disc, cont = e3_table(prefix)
@@ -104,22 +111,24 @@ def fig_e3():
             if key not in disc:
                 continue
             H = sorted(disc[key])
-            y = [max(np.mean(disc[key][h]), FLOOR) for h in H]
-            lo = [max(min(disc[key][h]), FLOOR) for h in H]
-            hi = [max(disc[key][h]) for h in H]
+            y = fl([np.mean(disc[key][h]) for h in H])
+            lo = fl([min(disc[key][h]) for h in H])
+            hi = fl([max(disc[key][h]) for h in H])
             ax.errorbar(H, y, yerr=[np.subtract(y, lo), np.subtract(hi, y)], fmt="-o", color=c,
                         label=label, capsize=0, elinewidth=1)
         for ls, name in [("--", "gaussian"), (":", "uniform")]:
             if name in cont:
                 best = min(np.mean(v) for v in cont[name].values())
-                ax.axhline(best, color=INK2, ls=ls, lw=1.2, label=f"{name} (best d_z)")
+                ax.axhline(fl(best), color=INK2, ls=ls, lw=1.2, label=f"{name} (best d_z)")
         if prefix.startswith("mix16"):
             ax.axvline(4, color=INK2, lw=0.8)
             ax.text(4.3, 0.97, "log2 r", color=INK2, fontsize=8, va="top",
                     transform=ax.get_xaxis_transform())
         ax.set(xscale="log", yscale="log", xlabel="source entropy H(Z)  [bits]", title=title)
         ax.set_xticks([1, 2, 4, 8, 16, 32], [1, 2, 4, 8, 16, 32])
-    axes[0][0].set_ylabel("exact KL(p || p_theta)  [nats]")
+    axes[0][0].set_ylabel("KL(p || p_theta)  [nats]")
+    fig.text(0.0, -0.06, "Points: mean over 3 seeds, bars: min-max. KL is exact for sources with K <= 2^16 atoms "
+             f"and a 2^16-sample MC estimate otherwise (bias < 1%). {FLOOR_NOTE}.", fontsize=8, color=INK2)
     axes[0][-1].legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=8)
     fig.suptitle("E3: same generator and objective, only P_Z changes", y=1.02)
     save(fig, "e3_sources.png")
@@ -131,7 +140,7 @@ def fig_e4():
         return
     fams = sorted({r["family"] for r in rs})
     cells = list(dict.fromkeys((r["source"], r["coupling"]) for r in rs))
-    metrics_ = [("test_tok_acc", "held-out token accuracy"), ("kl", "deployed KL(p || p_G)  [nats]")]
+    metrics_ = [("test_tok_acc", "held-out token accuracy"), ("kl", "KL(p || p_G) on held-out z  [nats]")]
     fig, axes = plt.subplots(len(fams), 2, figsize=(11, 3.2 * len(fams)), squeeze=False)
     for i, fam in enumerate(fams):
         for j, (key, label) in enumerate(metrics_):
@@ -162,22 +171,58 @@ def fig_e6():
     fig, axes = plt.subplots(1, len(rvals), figsize=(3.6 * len(rvals), 3.4), sharey=True, squeeze=False)
     for ax, rv in zip(axes[0], rvals):
         sub = [r for r in rs if r["config"]["data"] == f"code{rv}"]
-        for c, src, label in [(SLOTS[0], "gaussian", "Gaussian d=8"),
-                              (SLOTS[1], "categorical", f"categorical K={4 * rv}")]:
-            pts = sorted((r["config"]["N"], r["final"]["kl"]) for r in sub
-                         if r["config"]["source"] == src and not r["config"]["enumerate"])
-            if pts:
-                ax.plot(*zip(*pts), "-o", color=c, label=label)
+        for c, src, label in [(SLOTS[0], "gaussian", "Gaussian d=8, N samples"),
+                              (SLOTS[1], "categorical", f"categorical K={4 * rv}, N samples")]:
+            by_n = collections.defaultdict(list)
+            for r in sub:
+                if r["config"]["source"] == src and not r["config"]["enumerate"]:
+                    by_n[r["config"]["N"]].append(r["final"]["kl"])
+            if by_n:
+                ns = sorted(by_n)
+                ax.plot(ns, fl([np.mean(by_n[n]) for n in ns]), "-o", color=c, label=label)
         enum = [r["final"]["kl"] for r in sub if r["config"]["enumerate"]]
         if enum:
-            ax.axhline(max(enum[0], FLOOR), color=SLOTS[1], ls="--", lw=1.2, label="categorical, enumerated")
+            ax.axhline(fl(np.mean(enum)), color=SLOTS[1], ls="--", lw=1.2, label="categorical, all K enumerated")
         ax.axvline(rv, color=INK2, lw=0.8)
-        ax.set(xscale="log", yscale="log", title=f"code{rv}: needs {int(math.log2(rv))} bits",
+        ax.set(xscale="log", yscale="log", title=f"code{rv} (exact fit needs {int(math.log2(rv))} bits)",
                xlabel="source samples per step N")
-    axes[0][0].set_ylabel("exact KL  [nats]")
-    axes[0][0].legend(fontsize=8)
-    fig.suptitle("E6: the MC marginal likelihood needs N >~ 2^I (vertical line: N = r)", y=1.03)
+        ax.legend(fontsize=7)
+    axes[0][0].set_ylabel("KL(p || p_theta)  [nats]")
+    fig.suptitle("E6: the MC marginal-likelihood objective vs N (vertical line: N = r)", y=1.03)
     save(fig, "e6_nscaling.png")
+
+
+def fig_e8():
+    rs = load("e8/zipf16_*.json")
+    if not rs:
+        return
+    floors = {int(k): v for k, v in json.loads((R / "e8" / "floors.json").read_text()).items()}
+    fig, ax = plt.subplots(figsize=(6.4, 3.8))
+    for c, src, label in [(SLOTS[1], "categorical", "categorical, random emb. (exact objective)"),
+                          (SLOTS[0], "rademacher", "Rademacher hypercube (exact objective)")]:
+        by_h = collections.defaultdict(list)
+        for r in rs:
+            if r["config"]["source"] == src:
+                by_h[r["H_bits"]].append(r["final"]["kl"])
+        H = sorted(by_h)
+        if H:
+            y = fl([np.mean(by_h[h]) for h in H])
+            ax.errorbar(H, y, yerr=[y - fl([min(by_h[h]) for h in H]), fl([max(by_h[h]) for h in H]) - y],
+                        fmt="-o", color=c, label=label, elinewidth=1)
+    H = sorted(floors)
+    ax.plot([math.log2(k) for k in H], fl([floors[k] for k in H]), "--", color=INK2, lw=1.2,
+            label="best possible with K equal atoms")
+    by_d = collections.defaultdict(list)
+    for r in rs:
+        if r["config"]["source"] == "gaussian":
+            by_d[r["config"]["d"]].append(r["final"]["kl"])
+    if by_d:
+        ax.axhline(fl(min(np.mean(v) for v in by_d.values())), color=SLOTS[2], lw=1.5,
+                   label="Gaussian (best d_z, MC objective)")
+    ax.set(yscale="log", xlabel="source entropy H(Z) = log2 K  [bits]", ylabel="KL(p || p_theta)  [nats]",
+           title=f"E8: 16 codewords with Zipf weights ({FLOOR_NOTE})")
+    ax.legend(fontsize=8)
+    save(fig, "e8_mass.png")
 
 
 def fig_e7():
@@ -201,5 +246,5 @@ def fig_e7():
 
 
 if __name__ == "__main__":
-    for f in [fig_e1, fig_e2, fig_e3, fig_e4, fig_e6, fig_e7]:
+    for f in [fig_e1, fig_e2, fig_e3, fig_e4, fig_e6, fig_e7, fig_e8]:
         f()

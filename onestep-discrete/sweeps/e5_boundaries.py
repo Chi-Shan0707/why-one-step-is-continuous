@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import torch
+from scipy.stats import spearmanr
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import data as D  # noqa: E402
@@ -57,14 +58,14 @@ def lift(F):
     F = F.double()
     rate = F.mean(0)
     joint = (F.T @ F) / len(F)
-    out = joint / (rate[:, None] * rate[None, :]).clamp_min(1e-12)
+    out = joint / (rate[:, None] * rate[None, :])  # NaN if a position never flips
     out.fill_diagonal_(float("nan"))
     return out.cpu(), rate.cpu()
 
 
 def spearman(a, b):
-    ra, rb = a.argsort().argsort().double(), b.argsort().argsort().double()
-    return torch.corrcoef(torch.stack([ra, rb]))[0, 1].item()
+    m = ~(a.isnan() | b.isnan())
+    return float(spearmanr(a[m].numpy(), b[m].numpy()).statistic)
 
 
 def main():
@@ -86,8 +87,8 @@ def main():
                 row = {"family": fam, "source": kind, "d": d, "seed": seed, "kl": res["final"]["kl"],
                        "lift": L_.tolist(), "mi": mi.tolist(), "flip_rate": rate.tolist(),
                        "spearman_lift_mi": spearman(lv, mv),
-                       "mean_lift_adjacent": lv[dist == 1].mean().item(),
-                       "mean_lift_distant": lv[dist >= 3].mean().item()}
+                       "mean_lift_adjacent": lv[dist == 1].nanmean().item(),
+                       "mean_lift_distant": lv[dist >= 3].nanmean().item()}
                 print(fam, kind, seed, {k: round(v, 3) for k, v in row.items()
                                         if isinstance(v, float)}, flush=True)
                 (OUT / f"{fam}_{kind}_s{seed}_flips.json").write_text(json.dumps(row, indent=1))

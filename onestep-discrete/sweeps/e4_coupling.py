@@ -148,7 +148,9 @@ def kr_decode(p, u):
         m = pt.sum(list(range(i + 1, D.L))) if i < D.L - 1 else pt  # p(x_<=i), shape V^(i+1)
         cond = m[tuple(x[:, j] for j in range(i))]                   # (n, V) unnormalized
         cdf = (cond / cond.sum(-1, keepdim=True)).cumsum(-1)
-        x[:, i] = torch.searchsorted(cdf, u[:, i:i + 1].double()).clamp_max(D.V - 1)[:, 0]
+        xi = torch.searchsorted(cdf, u[:, i:i + 1].double(), right=True)[:, 0]
+        last = D.V - 1 - (cond.flip(-1) > 0).long().argmax(-1)       # last token with mass
+        x[:, i] = torch.minimum(xi, last)
     return x
 
 
@@ -181,7 +183,8 @@ def make_pairs(src, coupling, p, seed, cache):
         if coupling == "ot":
             ham = (all_codes()[z][:, None, :] != x[None, :, :]).sum(-1)
             x = x[assign(ham)]
-    n_tr = int(FRAC_TRAIN * M)
+    perm = torch.randperm(M, generator=g, device=DEV)  # matched pairs are not exchangeable (LSA order)
+    z, x, n_tr = z[perm], x[perm], int(FRAC_TRAIN * M)
     return z[:n_tr], x[:n_tr], z[n_tr:], x[n_tr:]
 
 
@@ -196,10 +199,13 @@ def evaluate(G, src, p, z_te, x_te, z_tr, x_tr, seed):
     out["test_tok_acc"], out["test_seq_acc"] = acc(z_te, x_te)
     out["test_ce"] = regression_ce(G(source_input(src, z_te)), x_te).item()
     if src in ("code", "onehot"):
-        z_dep = source_input(src, torch.arange(M, device=DEV))
-    else:
+        # main metric: law over held-out symbols only; also report the law over all K symbols,
+        # 80% of which are memorized training inputs
+        out.update(metrics(p, log_marginal(G, source_input(src, z_te))))
+        out["kl_all_symbols"] = metrics(p, log_marginal(G, source_input(src, torch.arange(M, device=DEV))))["kl"]
+    else:  # fresh z: all held out
         z_dep = source_input(src, sample_z(src, 2**16, torch.Generator(DEV).manual_seed(10_000 + seed)))
-    out.update(metrics(p, log_marginal(G, z_dep)))
+        out.update(metrics(p, log_marginal(G, z_dep)))
     return out
 
 
