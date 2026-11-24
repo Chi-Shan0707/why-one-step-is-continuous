@@ -52,8 +52,18 @@ def markov_chain(alpha=0.5, seed=0):
     return logp.exp()
 
 
+def codebook(r, seed=0):
+    """Uniform over r distinct random sequences: needs exactly log2 r bits of shared randomness."""
+    g = torch.Generator().manual_seed(seed)
+    p = torch.zeros(len(STATES), dtype=DT)
+    p[torch.randperm(len(STATES), generator=g)[:r]] = 1 / r
+    return p
+
+
 def make(family, seed=0):
-    """'mix<r>' (e.g. 'mix16'), 'copy', or 'markov'."""
+    """'mix<r>' (e.g. 'mix16'), 'code<r>', 'copy', or 'markov'."""
+    if family.startswith("code"):
+        return codebook(int(family[4:]), seed=seed)
     if family.startswith("mix"):
         return mixture_of_products(int(family[3:]), seed=seed)
     if family == "copy":

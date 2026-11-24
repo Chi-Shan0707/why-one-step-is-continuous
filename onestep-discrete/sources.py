@@ -83,7 +83,9 @@ def make_source(kind, d=1, m=2, K=2, seed=0):
         e = (torch.eye(m) - 1 / m) / math.sqrt((1 / m) * (1 - 1 / m))
         return Source(f"onehot_d{d}_m{m}", d * m, [e] * d)
     if kind == "categorical":
-        return Source(f"categorical_K{K}", CAT_DIM, [torch.randn(K, CAT_DIM, generator=g)])
+        e = torch.randn(K, CAT_DIM, generator=g)
+        e = (e - e.mean(0)) / e.std(0, unbiased=False) if K > 1 else torch.zeros(1, CAT_DIM)
+        return Source(f"categorical_K{K}", CAT_DIM, [e])
     if kind == "constant":
         return Source("constant", 1, [torch.zeros(1, 1)])
     raise ValueError(kind)

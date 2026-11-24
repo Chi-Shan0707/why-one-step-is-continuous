@@ -81,7 +81,8 @@ def oracle_cond(p):
         den = marg(keep)
         for i in range(D.L):
             if i not in keep:
-                out[U, :, i] = (marg(keep + [i]).clamp_min(1e-300) / den.clamp_min(1e-300)).log()
+                q = marg(keep + [i]) / den
+                out[U, :, i] = torch.where(den > 0, q, 1 / D.V).log()  # p(x_U)=0: never reached
     return out
 
 

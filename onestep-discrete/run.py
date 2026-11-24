@@ -36,6 +36,7 @@ class Config:
     enumerate: bool = False   # finite sources: use all K atoms instead of N samples (K <= 4096)
     eval_every: int = 500
     n_eval: int = 2**16       # MC samples for evaluation when the source cannot be enumerated
+    save_model: bool = False
 
     def name(self):
         src = make_source(self.source, self.d, self.m, self.K).name
@@ -94,6 +95,8 @@ def run(cfg: Config, force=False):
         res["train_kl_to_empirical"] = D.kl(w.double(), log_marginal(model, z_eval))
     res["wall_time"] = time.time() - t0
     out.parent.mkdir(parents=True, exist_ok=True)
+    if cfg.save_model:
+        torch.save(model.state_dict(), out.with_suffix(".pt"))
     out.write_text(json.dumps(res, indent=1))
     return res
 
