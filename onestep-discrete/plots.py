@@ -9,6 +9,7 @@ import matplotlib
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
+from matplotlib.patches import Patch  # noqa: E402
 import numpy as np  # noqa: E402
 
 R = Path(__file__).parent / "results"
@@ -134,31 +135,36 @@ def fig_e3():
     save(fig, "e3_sources.png")
 
 
+E4_CELLS = [("gauss", "random"), ("gauss", "vae"), ("gauss", "ot"), ("gauss", "ode"), ("unif", "kr"),
+            ("code", "random"), ("code", "ot"), ("quant", "kr"),
+            ("onehot", "random"), ("onehot", "ot"), ("shuf", "kr")]
+E4_GROUP = {"gauss": 0, "unif": 0, "code": 1, "quant": 1, "onehot": 2, "shuf": 2}
+E4_LEGEND = ["continuous source", "discrete source with geometry", "discrete source without geometry"]
+
+
 def fig_e4():
     rs = load("e4/*.json")
     if not rs:
         return
     fams = sorted({r["family"] for r in rs})
-    cells = list(dict.fromkeys((r["source"], r["coupling"]) for r in rs))
-    metrics_ = [("test_tok_acc", "held-out token accuracy"), ("kl", "KL(p || p_G) on held-out z  [nats]")]
-    fig, axes = plt.subplots(len(fams), 2, figsize=(11, 3.2 * len(fams)), squeeze=False)
+    metrics_ = [("test_tok_acc", "held-out token accuracy"), ("test_seq_acc", "held-out sequence accuracy")]
+    fig, axes = plt.subplots(len(fams), 2, figsize=(12, 3.3 * len(fams)), squeeze=False)
     for i, fam in enumerate(fams):
         for j, (key, label) in enumerate(metrics_):
             ax = axes[i][j]
             vals = [[r[key] for r in rs if r["family"] == fam and (r["source"], r["coupling"]) == c]
-                    for c in cells]
-            ax.bar(range(len(cells)), [np.mean(v) if v else np.nan for v in vals],
-                   color=[SLOTS[0] if c[0] in ("gauss", "unif") else SLOTS[1] for c in cells],
-                   edgecolor=SURF, linewidth=2)
+                    for c in E4_CELLS]
+            ax.bar(range(len(E4_CELLS)), [np.mean(v) if v else np.nan for v in vals],
+                   color=[SLOTS[E4_GROUP[c[0]]] for c in E4_CELLS], edgecolor=SURF, linewidth=2)
             for x, v in enumerate(vals):
                 ax.plot([x] * len(v), v, "o", color=INK, ms=3)
-            ax.set_xticks(range(len(cells)), [f"{s}\n{c}" for s, c in cells], fontsize=8)
-            ax.set(title=f"{fam}: {label}")
+            ax.set_xticks(range(len(E4_CELLS)), [f"{s}\n{c}" for s, c in E4_CELLS], fontsize=8)
+            ax.set(title=f"{fam}: {label}", ylim=(0, 1))
             ax.grid(axis="x", visible=False)
-    axes[0][0].bar([], [], color=SLOTS[0], label="continuous source")
-    axes[0][0].bar([], [], color=SLOTS[1], label="discrete source")
-    axes[0][0].legend(fontsize=8)
-    fig.suptitle("E4: regression on fixed (z, x) pairs", y=1.0)
+    axes[0][0].legend(handles=[Patch(color=SLOTS[k], label=lab) for k, lab in enumerate(E4_LEGEND)],
+                      fontsize=8, loc="upper left")
+    fig.suptitle("E4: fit G by regression on 3,277 fixed (z, x) pairs; test on 819 held-out z "
+                 "(bars: mean, dots: 3 seeds)", y=1.0)
     fig.tight_layout()
     save(fig, "e4_coupling.png")
 
@@ -167,7 +173,9 @@ def fig_e6():
     rs = load("e6/*.json")
     if not rs:
         return
-    rvals = sorted({int(r["config"]["data"][4:]) for r in rs})
+    # code1024 is the full parity code: every source stays at the product solution (no low-order
+    # gradient signal), a separate phenomenon reported in the text, so it is not plotted here
+    rvals = sorted({int(r["config"]["data"][4:]) for r in rs} - {1024})
     fig, axes = plt.subplots(1, len(rvals), figsize=(3.6 * len(rvals), 3.4), sharey=True, squeeze=False)
     for ax, rv in zip(axes[0], rvals):
         sub = [r for r in rs if r["config"]["data"] == f"code{rv}"]
@@ -197,31 +205,40 @@ def fig_e8():
     if not rs:
         return
     floors = {int(k): v for k, v in json.loads((R / "e8" / "floors.json").read_text()).items()}
-    fig, ax = plt.subplots(figsize=(6.4, 3.8))
-    for c, src, label in [(SLOTS[1], "categorical", "categorical, random emb. (exact objective)"),
-                          (SLOTS[0], "rademacher", "Rademacher hypercube (exact objective)")]:
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11.5, 3.9))
+    # left: final mass-allocation error vs H(Z)
+    for c, src, label in [(SLOTS[1], "categorical", "categorical, random emb."),
+                          (SLOTS[0], "rademacher", "Rademacher hypercube")]:
         by_h = collections.defaultdict(list)
         for r in rs:
             if r["config"]["source"] == src:
-                by_h[r["H_bits"]].append(r["final"]["kl"])
+                by_h[r["H_bits"]].append(r["traj"][-1]["kl_alloc"])
         H = sorted(by_h)
-        if H:
-            y = fl([np.mean(by_h[h]) for h in H])
-            ax.errorbar(H, y, yerr=[y - fl([min(by_h[h]) for h in H]), fl([max(by_h[h]) for h in H]) - y],
-                        fmt="-o", color=c, label=label, elinewidth=1)
+        y = fl([np.mean(by_h[h]) for h in H])
+        a1.errorbar(H, y, yerr=[y - fl([min(by_h[h]) for h in H]), fl([max(by_h[h]) for h in H]) - y],
+                    fmt="-o", color=c, label=label + " (exact objective)", elinewidth=1)
     H = sorted(floors)
-    ax.plot([math.log2(k) for k in H], fl([floors[k] for k in H]), "--", color=INK2, lw=1.2,
-            label="best possible with K equal atoms")
-    by_d = collections.defaultdict(list)
-    for r in rs:
-        if r["config"]["source"] == "gaussian":
-            by_d[r["config"]["d"]].append(r["final"]["kl"])
-    if by_d:
-        ax.axhline(fl(min(np.mean(v) for v in by_d.values())), color=SLOTS[2], lw=1.5,
-                   label="Gaussian (best d_z, MC objective)")
-    ax.set(yscale="log", xlabel="source entropy H(Z) = log2 K  [bits]", ylabel="KL(p || p_theta)  [nats]",
-           title=f"E8: 16 codewords with Zipf weights ({FLOOR_NOTE})")
-    ax.legend(fontsize=8)
+    a1.plot([math.log2(k) for k in H], fl([floors[k] for k in H]), "--", color=INK2, lw=1.2,
+            label="best allocation, one codeword per atom")
+    g = [r["traj"][-1]["kl_alloc"] for r in rs if r["config"]["source"] == "gaussian"]
+    a1.axhline(fl(np.mean(g)), color=SLOTS[2], lw=1.5, label="Gaussian (d = 2, 4, 8)")
+    a1.set(yscale="log", xlabel="source entropy H(Z) = log2 K  [bits]",
+           ylabel="mass-allocation error KL_alloc  [nats]", title="after 16k steps")
+    a1.legend(fontsize=8)
+    # right: allocation vs leakage over training, three representative sources
+    for c, (src, key, val), label in [(SLOTS[1], ("categorical", "K", 1024), "categorical K=1024"),
+                                      (SLOTS[0], ("rademacher", "d", 12), "Rademacher d=12"),
+                                      (SLOTS[2], ("gaussian", "d", 2), "Gaussian d=2")]:
+        sub = [r for r in rs if r["config"]["source"] == src and r["config"][key] == val]
+        steps = [t["step"] for t in sub[0]["traj"]]
+        for metric, ls in [("kl_alloc", "-"), ("leak_nats", ":")]:
+            a2.plot(steps, fl(np.mean([[t[metric] for t in r["traj"]] for r in sub], 0)), ls, color=c,
+                    label=f"{label}: {'allocation' if metric == 'kl_alloc' else 'leakage'}")
+    a2.set(yscale="log", xlabel="training step", ylabel="nats", title="during training (mean of 3 seeds)")
+    a2.legend(fontsize=7, ncol=1)
+    fig.suptitle("E8: 16 codewords with Zipf weights. KL = allocation error + leakage. "
+                 f"Atoms cannot move mass; a continuous source can. ({FLOOR_NOTE})", y=1.02)
+    fig.tight_layout()
     save(fig, "e8_mass.png")
 
 
@@ -234,14 +251,13 @@ def fig_e7():
         for c, kind, label in [(SLOTS[0], "uniform", "uniform-noise teacher (prior H(Z) = 12 bits)"),
                                (SLOTS[1], "mask", "masking teacher (prior H(Z) = 0 bits)")]:
             rows = [x for x in r["rows"] if x["kernel"] == kind]
-            ax.plot([x["I_bits"] for x in rows], [max(x["kl"], FLOOR) for x in rows], "-o", color=c,
-                    label=label)
+            ax.plot([x["I_bits"] for x in rows], fl([x["kl"] for x in rows]), "-o", color=c, label=label)
         ax.axhline(r["tc"], color=INK2, ls=":", lw=1)
         ax.set(yscale="log", xlabel="I(Z; X) of the teacher coupling  [bits]",
                title=f"{r['family']} (dotted: TC = {r['tc']:.2f})")
     axes[0][0].set_ylabel("KL of best regression student")
     axes[0][0].legend(fontsize=8)
-    fig.suptitle("E7: a discrete teacher's coupling carries I(Z;X) = 0 at its prior", y=1.03)
+    fig.suptitle(f"E7: a discrete teacher's coupling carries I(Z;X) = 0 at its prior ({FLOOR_NOTE})", y=1.03)
     save(fig, "e7_teacher_coupling.png")
 
 

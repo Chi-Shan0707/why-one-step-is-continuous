@@ -2,7 +2,8 @@
 
 Data zipf16: 16 deterministic codewords with Zipf weights. A finite source with K equal atoms can
 only give each codeword a multiple of 1/K, and that allocation is piecewise constant in the
-parameters (zero gradient). We compare the trained KL with the best achievable allocation floor
+parameters (zero gradient). We compare the trained KL with the best allocation in which every
+atom commits to one codeword (not a strict bound: atoms that spread over codewords can leak a little),
   floor(K) = min_{n_c >= 1, sum n_c = K} sum_c w_c log(w_c K / n_c)   (exact, greedy),
 and with Gaussian sources whose mode masses are differentiable functions of the parameters.
 """
@@ -34,12 +35,13 @@ def configs():
     for seed in range(3):
         for K in [16, 64, 256, 1024, 4096]:
             out.append(Config(exp="e8", data=DATA, source="categorical", K=K, enumerate=True, seed=seed,
-                              steps=8000))
+                              steps=16000, eval_every=1000))
         for d in [4, 6, 8, 10, 12]:
             out.append(Config(exp="e8", data=DATA, source="rademacher", d=d, enumerate=True, seed=seed,
-                              steps=8000))
+                              steps=16000, eval_every=1000))
         for d in [2, 4, 8]:
-            out.append(Config(exp="e8", data=DATA, source="gaussian", d=d, N=1024, seed=seed, steps=8000))
+            out.append(Config(exp="e8", data=DATA, source="gaussian", d=d, N=1024, seed=seed,
+                              steps=16000, eval_every=1000))
     return out
 
 

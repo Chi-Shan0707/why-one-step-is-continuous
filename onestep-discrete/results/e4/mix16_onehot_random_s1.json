@@ -1,0 +1,18 @@
+{
+ "family": "mix16",
+ "source": "onehot",
+ "coupling": "random",
+ "seed": 1,
+ "tc": 2.012881647150895,
+ "target_tv": 0.1692169577306188,
+ "train_tok_acc": 1.0,
+ "train_seq_acc": 1.0,
+ "test_tok_acc": 0.3479674756526947,
+ "test_seq_acc": 0.0,
+ "test_ce": 2.5848774909973145,
+ "kl": 9.327209679386193,
+ "tv": 0.9305307387071716,
+ "tc_model": 8.267709252418598e-05,
+ "kl_all_symbols": 0.8533675198721482,
+ "wall_time": 8.664681196212769
+}

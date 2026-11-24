@@ -1,0 +1,18 @@
+{
+ "family": "markov",
+ "source": "onehot",
+ "coupling": "random",
+ "seed": 0,
+ "tc": 1.7526679472401607,
+ "target_tv": 0.17419859248105857,
+ "train_tok_acc": 1.0,
+ "train_seq_acc": 1.0,
+ "test_tok_acc": 0.3680894076824188,
+ "test_seq_acc": 0.0,
+ "test_ce": 2.6604726314544678,
+ "kl": 9.623494930476852,
+ "tv": 0.8486435962360688,
+ "tc_model": 0.00039823954082862656,
+ "kl_all_symbols": 0.9256581584561234,
+ "wall_time": 13.651387691497803
+}

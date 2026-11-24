@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+*.log
+*.pt
 onestep-discrete/results/calib/
 onestep-discrete/results/debug/
-*.log
