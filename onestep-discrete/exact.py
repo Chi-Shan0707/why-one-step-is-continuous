@@ -37,11 +37,11 @@ def eval_z(source, n_mc, gen, device, enum_cap=2**16):
 
 
 def metrics(p, log_q):
-    """Exact KL(p||q), TV, and the model's own TC, all in nats.
+    """Exact KL(p||q), TV, and the model's own TC, all in nats. log_q must be normalized.
 
     KL splits exactly as kl = kl_alloc + leak_nats: kl_alloc = KL(p || q restricted to supp p and
     renormalized) is how mass is shared among the data states; leak_nats = -log q(supp p) is the
-    mass lost to states outside the support (both are 0 / kl for full-support p)."""
+    mass lost to states outside the support. For full-support p they are kl and 0."""
     p = p.to(log_q.device)
     q = log_q.exp()
     log_in = log_q[p > 0].logsumexp(0)

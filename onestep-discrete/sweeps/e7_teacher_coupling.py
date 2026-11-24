@@ -28,21 +28,30 @@ def onehot(states, n):
     return torch.nn.functional.one_hot(states, n).flatten(1).to(D.DT)
 
 
-def student_law(p, logK, Vz):
-    """logK (V, Vz): log k(z_tok | x_tok). Returns KL(p||p_G), I(Z;X) bits, H(Z) bits."""
+def forward_joint(p, logK, Vz):
+    """(Z, X) log pi(z, x) = log p(x) + sum_i log k(z_i | x_i); logK (V, Vz)."""
     X = D.STATES.to(DEV)
     Z = torch.tensor(list(itertools.product(range(Vz), repeat=D.L)), device=DEV)
-    ohx, ohz = onehot(X, D.V), onehot(Z, Vz)
     W = torch.block_diag(*[logK.clamp_min(NEG)] * D.L)                 # (L*V, L*Vz)
-    logj = (ohz @ W.T @ ohx.T) + p.clamp_min(1e-300).log()[None]     # (Z, X) log pi(z, x)
-    logpz = logj.logsumexp(1)
+    return onehot(Z, Vz) @ W.T @ onehot(X, D.V).T + p.clamp_min(1e-300).log()[None]
+
+
+def student_from_joint(p, logj):
+    """Regression-optimal one-step student for the coupling exp(logj) (Z, X).
+
+    Returns KL(p || p_G), I(Z;X) bits and H(Z) bits, where p_G = sum_z pi(z) prod_i pi(x_i | z)."""
+    ohx = onehot(D.STATES.to(DEV), D.V)
+    logpz, logpx = logj.logsumexp(1), logj.logsumexp(0)
     post = (logj - logpz[:, None]).exp()                              # pi(x | z)
     logq = (post @ ohx).clamp_min(1e-300).log()                       # (Z, L*V) log pi(x_i | z)
     logpg = (logq @ ohx.T + logpz[:, None]).logsumexp(0)
-    pz = logpz.exp()
-    mi = (logj.exp() * (logj - logpz[:, None] - p.clamp_min(1e-300).log()[None])).nansum().item()
-    hz = -(pz * logpz).nansum().item()
+    mi = (logj.exp() * (logj - logpz[:, None] - logpx[None])).nansum().item()
+    hz = -(logpz.exp() * logpz).nansum().item()
     return D.kl(p, logpg), mi / math.log(2), hz / math.log(2)
+
+
+def student_law(p, logK, Vz):
+    return student_from_joint(p, forward_joint(p, logK, Vz))
 
 
 def kernel(kind, a):

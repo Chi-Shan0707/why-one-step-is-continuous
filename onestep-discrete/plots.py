@@ -206,24 +206,24 @@ def fig_e8():
         return
     floors = {int(k): v for k, v in json.loads((R / "e8" / "floors.json").read_text()).items()}
     fig, (a1, a2) = plt.subplots(1, 2, figsize=(11.5, 3.9))
-    # left: final mass-allocation error vs H(Z)
+    # left: final total KL vs H(Z), against what K atoms can achieve
     for c, src, label in [(SLOTS[1], "categorical", "categorical, random emb."),
                           (SLOTS[0], "rademacher", "Rademacher hypercube")]:
         by_h = collections.defaultdict(list)
         for r in rs:
             if r["config"]["source"] == src:
-                by_h[r["H_bits"]].append(r["traj"][-1]["kl_alloc"])
+                by_h[r["H_bits"]].append(r["final"]["kl"])
         H = sorted(by_h)
         y = fl([np.mean(by_h[h]) for h in H])
         a1.errorbar(H, y, yerr=[y - fl([min(by_h[h]) for h in H]), fl([max(by_h[h]) for h in H]) - y],
                     fmt="-o", color=c, label=label + " (exact objective)", elinewidth=1)
     H = sorted(floors)
     a1.plot([math.log2(k) for k in H], fl([floors[k] for k in H]), "--", color=INK2, lw=1.2,
-            label="best allocation, one codeword per atom")
-    g = [r["traj"][-1]["kl_alloc"] for r in rs if r["config"]["source"] == "gaussian"]
-    a1.axhline(fl(np.mean(g)), color=SLOTS[2], lw=1.5, label="Gaussian (d = 2, 4, 8)")
+            label="achievable with K atoms (one codeword each)")
+    g = [r["final"]["kl"] for r in rs if r["config"]["source"] == "gaussian"]
+    a1.axhline(fl(np.mean(g)), color=SLOTS[2], lw=1.5, label="Gaussian, d = 2, 4, 8 (MC objective)")
     a1.set(yscale="log", xlabel="source entropy H(Z) = log2 K  [bits]",
-           ylabel="mass-allocation error KL_alloc  [nats]", title="after 16k steps")
+           ylabel="KL(p || p_theta) after 16k steps  [nats]", title="total KL vs what the atoms allow")
     a1.legend(fontsize=8)
     # right: allocation vs leakage over training, three representative sources
     for c, (src, key, val), label in [(SLOTS[1], ("categorical", "K", 1024), "categorical K=1024"),
@@ -236,14 +236,14 @@ def fig_e8():
                     label=f"{label}: {'allocation' if metric == 'kl_alloc' else 'leakage'}")
     a2.set(yscale="log", xlabel="training step", ylabel="nats", title="during training (mean of 3 seeds)")
     a2.legend(fontsize=7, ncol=1)
-    fig.suptitle("E8: 16 codewords with Zipf weights. KL = allocation error + leakage. "
-                 f"Atoms cannot move mass; a continuous source can. ({FLOOR_NOTE})", y=1.02)
+    fig.suptitle("E8: 16 codewords with Zipf weights. Atomic sources leave mass misallocated; "
+                 f"a continuous source reallocates it. ({FLOOR_NOTE})", y=1.02)
     fig.tight_layout()
     save(fig, "e8_mass.png")
 
 
 def fig_e7():
-    rs = load("e7/*.json")
+    rs = [r for r in load("e7/*.json") if "rows" in r]
     if not rs:
         return
     fig, axes = plt.subplots(1, len(rs), figsize=(4.2 * len(rs), 3.6), squeeze=False)
@@ -252,12 +252,19 @@ def fig_e7():
                                (SLOTS[1], "mask", "masking teacher (prior H(Z) = 0 bits)")]:
             rows = [x for x in r["rows"] if x["kernel"] == kind]
             ax.plot([x["I_bits"] for x in rows], fl([x["kl"] for x in rows]), "-o", color=c, label=label)
+        dfm = R / "e7" / f"{r['family']}_dfm.json"
+        if dfm.exists():
+            d = json.loads(dfm.read_text())
+            ax.plot(d["I_bits"], fl(d["student_kl"]), "*", ms=14, color=SLOTS[2],
+                    label="DFM marginal-CTMC teacher from its uniform prior")
         ax.axhline(r["tc"], color=INK2, ls=":", lw=1)
         ax.set(yscale="log", xlabel="I(Z; X) of the teacher coupling  [bits]",
                title=f"{r['family']} (dotted: TC = {r['tc']:.2f})")
     axes[0][0].set_ylabel("KL of best regression student")
-    axes[0][0].legend(fontsize=8)
-    fig.suptitle(f"E7: a discrete teacher's coupling carries I(Z;X) = 0 at its prior ({FLOOR_NOTE})", y=1.03)
+    fig.legend(*axes[0][0].get_legend_handles_labels(), loc="lower center", ncol=3, fontsize=9,
+               bbox_to_anchor=(0.5, -0.1))
+    fig.suptitle("E7: one-step students distilled from discrete teachers (exact). Curves: forward joint at noise "
+                 f"level alpha; alpha = 0 is the reversed chain from its prior. ({FLOOR_NOTE})", y=1.04)
     save(fig, "e7_teacher_coupling.png")
 
 
