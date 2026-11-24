@@ -129,7 +129,7 @@ def fig_e3():
         ax.set_xticks([1, 2, 4, 8, 16, 32], [1, 2, 4, 8, 16, 32])
     axes[0][0].set_ylabel("KL(p || p_theta)  [nats]")
     fig.text(0.0, -0.06, "Points: mean over 3 seeds, bars: min-max. KL is exact for sources with K <= 2^16 atoms "
-             f"and a 2^16-sample MC estimate otherwise (bias < 1%). {FLOOR_NOTE}.", fontsize=8, color=INK2)
+             f"and a 2^16-sample MC estimate otherwise (implied bias: median 0.2%, max 2%). {FLOOR_NOTE}.", fontsize=8, color=INK2)
     axes[0][-1].legend(loc="upper left", bbox_to_anchor=(1.02, 1), fontsize=8)
     fig.suptitle("E3: same generator and objective, only P_Z changes", y=1.02)
     save(fig, "e3_sources.png")

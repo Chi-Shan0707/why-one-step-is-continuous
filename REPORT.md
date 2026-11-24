@@ -12,10 +12,11 @@ by Z. Every one-step generator that works well gets Z from **continuous** noise.
 > What exactly is missing from a discrete source of randomness? How much of it is
 > information theory (a hard limit), and how much is geometry and optimization (a soft limit)?
 
-## The answer in one paragraph
+## The answer
 
-Information theory gives a hard limit, and it is real but cheap. Z must carry at least log₂(rank)
-bits. Below that every source fails identically. Above it, **representation is not the problem**:
+Information theory gives a hard limit, and it is real but cheap. A uniform source needs at least
+rank(p) atoms, i.e. log₂K ≥ log₂ rank bits. (For non-uniform sources the general Shannon bound is
+Wyner's common information, which is ≤ log₂ rank.) Below that every source fails alike. Above it, **representation is not the problem**:
 with K atoms the achievable KL is tiny, and on an equal-weight mixture the best discrete sources
 (well-separated atoms) fit *better* than Gaussian. The plan's main conjecture H4 is **falsified as
 stated**. What discrete noise lacks is what one-step *training* relies on:
@@ -26,37 +27,43 @@ stated**. What discrete noise lacks is what one-step *training* relies on:
    means moving whole atoms. In the hard-assignment limit the mode masses are piecewise constant
    in θ. With softmax outputs, an atom moving between codewords must cross product distributions
    that leak onto non-codewords, and saturated atoms have vanishing gradients. Empirically the
-   allocation error is **flat (within ±6%) from step 1k to step 16k**. Total KL stays
-   **12× to more than 10⁴× above what the atoms could achieve**, and on unequal weights every
-   finite source but one fits *worse* than Gaussian. *(E8)*
+   allocation error is **flat (within ±6%) from step 1k to step 16k**. For K ≥ 64 atoms, total KL
+   stays **12× to more than 10⁴× above what the atoms could achieve**. On unequal weights the
+   best Gaussian (d = 2, 0.018) fits better than every finite source. *(E8)*
 2. **A deterministic noise → data transport to learn from.** At scale, one-step generators are
    trained by regressing onto a coupling (z, x) from a teacher or an encoder, because the
-   likelihood needs ~2^I(X;Z) source samples per step *(E6)*. A continuous state space has a
-   probability-flow ODE whose coupling is deterministic (for argmax-decoded tokens,
-   I(Z;X) = H(X)). A finite state space cannot have one. A deterministic map on a finite set
-   cannot split an atom's mass, and there are only finitely many such maps, so pushforward
-   probabilities are quantized and cannot follow a continuous marginal path p_t. Every
-   diffusion- or flow-style discrete teacher must inject fresh randomness, and its coupling is
-   **stochastic**. How much information survives depends on the sampler:
-   * the time-reversed noising chain started from its prior keeps none: **I(Z;X) = 0**, student
-     KL = TC(p) exactly, even with H(Z) = 12 bits;
-   * an exact **Discrete Flow Matching** teacher keeps a little: I = 1.25–1.30 bits of H(X) ≈ 8.6,
-     and the student KL is 1.07–1.41 vs TC 1.75–2.01.
+   likelihood needs ~2^I(X;Z) source samples per step *(E6)*. Generative teachers are built by
+   *marginalizing* a path between independent noise and data. The two state spaces then behave
+   differently:
+   * **Continuous space.** Averaging the conditional velocities gives one vector field, and ODE
+     trajectories cannot branch. The teacher's noise → data map is therefore deterministic for
+     free (for argmax-decoded tokens, I(Z;X) = H(X)).
+   * **Finite space.** Averaging the conditional rates gives a CTMC that can jump from one state
+     to several targets. It branches, so the coupling is **stochastic**:
+     * the time-reversed noising chain started from its prior keeps nothing: **I(Z;X) = 0**, and
+       the student's KL = TC(p) exactly, even with H(Z) = 12 bits;
+     * an exact **Discrete Flow Matching** teacher keeps a little: ~1.3 of ~8.6 bits on mix16
+       and Markov, with student KL 1.07–1.41 vs TC 1.75–2.01.
 
-   Either way the student is far from what a deterministic coupling would allow (KL → 0). *(E7, E7b)*
+   Deterministic discrete couplings do exist: an inverse-CDF sampler driven by Z, OT
+   assignments, special CTMCs, iterative rectification as in ReDi. But they have to be
+   *constructed* rather than obtained by marginalization, and they are only useful when the
+   source geometry is aligned with them (point 3). *(E7, E7b)*
 3. **Geometry aligned with that transport**, so the coupling is learnable on unseen z.
    Discreteness itself costs nothing here. On Markov data, an ordered 64-level grid of inverse-CDF
-   uniforms matches continuous uniforms (held-out token accuracy 0.865 vs 0.858). The *same source
+   uniforms matches continuous uniforms (held-out token accuracy 0.865 vs 0.858), and per-position
+   tokens aligned by Hamming-OT match a Gaussian OT coupling. The *same source
    law* with its levels shuffled falls to the best z-independent baseline (0.368 vs 0.379). *(E4)*
 
 So "one-step should be continuous" means: the source should be **atomless** so mass can flow; the
-training coupling should come from a **deterministic transport**, which only continuous-state
-dynamics provide; and the noise needs **geometry aligned with that transport**. Continuous noise
+training coupling should come from a **deterministic transport**, which continuous-state
+marginalization provides for free and discrete marginalization does not; and the noise needs
+**geometry aligned with that transport**. Continuous noise
 gives all three for free. Discrete noise supplies bits, but none of these by default.
 
 | | hard (information) | soft (optimization / geometry) |
 |---|---|---|
-| what limits | H(Z) ≥ log₂ rank(p). Below it every source fails (E1, E3). | mass allocation (E8); information *in the training coupling* (E7); coupling learnability (E4) |
+| what limits | K ≥ rank(p) atoms for a uniform source (Wyner's common information in general). Below it every source fails (E1, E3). | mass allocation (E8); information *in the training coupling* (E7); coupling learnability (E4) |
 | binding in practice? | only for mask-type noise (H(Z) = 0 ⇒ KL = TC exactly) | yes: these separate discrete from continuous |
 | continuous noise fixes it by | n/a | atomless source ⇒ mass moves with boundaries; ODE ⇒ deterministic coupling; metric ⇒ smooth coupling |
 
@@ -75,14 +82,18 @@ information **I(Z;X) of the training coupling**, not the entropy H(Z) of the sou
   * `code<r>`: r codewords of the distance-2 parity code, so rank = r exactly;
   * `zipf16`: 16 such codewords with Zipf weights.
 * **Generator**: MLP z → 256 → 256 → 6×4 logits, SiLU, Adam 1e-3 with cosine decay.
-* **Objective** (identical for every source): −Σₓ w(x) log (1/N) Σₙ ∏ᵢ p_θ(xᵢ|zₙ), with N = 256
-  fresh source samples per step and w = p (population) or the empirical distribution of n samples.
+* **Objective** (identical for every source within an experiment): −Σₓ w(x) log (1/N) Σₙ ∏ᵢ p_θ(xᵢ|zₙ),
+  with w = p (population) or the empirical distribution of n samples. E3 uses N = 256 fresh source
+  samples per step; E3b, E6, and E8 vary N or enumerate all atoms, as stated. E4 instead uses
+  supervised regression (CE) on fixed pairs.
 * **Metrics**: KL(p‖p_θ), TV, TC(p_θ). They are exact for finite sources with K ≤ 2¹⁶ atoms. For
-  continuous sources and larger K we use a 2¹⁶-sample MC estimate. Re-evaluating 151 MC runs with
+  continuous sources and larger K (including the H = 32 discrete sources) we use a 2¹⁶-sample MC
+  estimate. Re-evaluating 151 MC runs with
   2¹⁴ samples changes KL by a median of 0.5% (90th percentile 3%, max 10%), i.e. an implied bias
   of ≤ 3.4% (median 0.2%).
 * Each run writes one JSON (config, metrics, trajectory, wall time). Figures are built from the
-  JSONs only (`onestep-discrete/plots.py`). E3b, E6, and E7b use one seed; everything else uses 3.
+  JSONs only (`onestep-discrete/plots.py`). E3b and E6 use one seed, E7 and E7b are exact computations,
+  and everything else uses 3 seeds.
 
 ---
 
@@ -184,7 +195,7 @@ version answers the mechanistic question.
 | 1 | not enough bits | **real but cheap**; binding only for mask-type noise | E1, E3 |
 | 2 | discrete sources cannot represent the data | **no**; K atoms can represent it almost exactly | E3, E3b, E8 |
 | 3 | the likelihood objective does not scale | **true for every source** (continuous is worse), so practice uses couplings | E6 |
-| 4 | discrete teachers give poor couplings | **yes**: always stochastic; I = 0 for the reversed chain, partial for DFM | E7, E7b |
+| 4 | discrete teachers give poor couplings | **yes, for marginalized (independent-coupling) teachers**: I = 0 for the reversed chain, partial for DFM | E7, E7b |
 | 5 | discrete couplings are not learnable | **only without aligned geometry**; ordered discrete = continuous | E4 |
 | 6 | atomic sources cannot reallocate mass | **yes**: allocation flat for atoms, → 0 for continuous | E8 |
 
@@ -218,8 +229,9 @@ generates p_G(x) = Σ_z π(z) ∏ᵢ q(xᵢ|z). We compute it exactly for two te
   starting the reversed chain from the α-marginal, which is *not* the prior.
 * **E7b: Discrete Flow Matching teacher.** This is the marginal CTMC of the mixture path, started
   from Uniform(V^L), with rates P(X₁ᵢ = y | X_t)/(1−t). We integrate the forward Kolmogorov equation
-  for the joint of (X₀, X_t) over all 4,096 × 4,096 pairs; the marginal matches p_t to
-  ≤ 7·10⁻⁴ TV throughout.
+  for the joint of (X₀, X_t) over all 4,096 × 4,096 pairs (Euler in s = −log(1−t), step 0.0025).
+  The marginal matches p_t to ≤ 9·10⁻⁴ TV, checked every 20 steps. Doubling the step changes the
+  student KL by ≤ 0.007 nats and I by ≤ 0.005 bits.
 
 ![E7](onestep-discrete/figures/e7_teacher_coupling.png)
 
@@ -227,23 +239,28 @@ generates p_G(x) = Σ_z π(z) ∏ᵢ q(xᵢ|z). We compute it exactly for two te
 |---|---|---|---|
 | reversed noising chain (uniform prior) | 12 bits | **0 / 0 / 0** | 2.013 / 1.753 / 6.931 (= TC) |
 | reversed masking chain (all-mask prior) | 0 bits | 0 / 0 / 0 | = TC |
-| DFM marginal CTMC (uniform prior) | 12 bits | 1.30 / 1.25 / 0.64 | 1.41 / 1.07 / 2.15 |
+| DFM marginal CTMC (uniform prior) | 12 bits | 1.31 / 1.25 / 0.64 | 1.41 / 1.07 / 2.14 |
 | *deterministic coupling (e.g. ODE + argmax)* | | *= H(X): 8.7 / 8.6 / 2.0* | *→ 0* |
 
 * Twelve bits of prior noise give nothing through the reversed chain. A DFM teacher recovers
   30–69% of TC, but its coupling is still stochastic, so a one-step student cannot get close.
-* On mix16 and Markov the student's error is essentially a function of the coupling's I(Z;X), and
-  the DFM points fall on the forward-joint curves. On copy the masking kernel is 1.7–2.6× better
-  than the uniform kernel at equal I, because one unmasked token pins the whole sequence.
-* Why discrete teachers are stochastic: a deterministic map on a finite set cannot split an atom's
-  mass, and there are only finitely many maps. So deterministic dynamics give quantized
-  pushforward probabilities and cannot follow a continuous marginal path p_t, and any
-  diffusion/flow-style discrete sampler must inject fresh randomness. Continuous diffusion's SDE
-  sampler has the same problem (I(Z_T; X₀) → 0), but it also has a probability-flow ODE with the
-  same marginals and a deterministic coupling. That is what consistency models, flow maps,
-  MeanFlow, FMLM, and Duo distill.
-* A one-shot deterministic map with discrete noise does exist (E4's KR coupling). But it is the
-  sampler with its per-step uniforms moved into Z: continuous or ordered noise.
+* The student's error is mostly a function of the coupling's I(Z;X). On mix16 and Markov the DFM
+  points sit 10–14% above the forward-joint curves at the same I. On copy the masking kernel is
+  1.2–1.7× better than the uniform kernel at equal I, because one unmasked token pins the whole
+  sequence.
+* Why marginalized discrete teachers are stochastic: a teacher is built by averaging conditional
+  dynamics over an independent coupling of noise and data. In continuous space the average is a
+  velocity field, ODE trajectories cannot branch, and the endpoint map is deterministic.
+  Continuous diffusion's SDE sampler is as uninformative as the reversed chain
+  (I(Z_T; X₀) → 0), but its probability-flow ODE has the same marginals and a deterministic
+  coupling. That is what consistency models, flow maps, MeanFlow, FMLM, and Duo distill. In a
+  finite space the average is a jump-rate matrix: from one state the chain can jump to several
+  targets, so the endpoint is random given the start.
+* Deterministic discrete couplings are possible, but they must be built rather than inherited.
+  Examples: E4's inverse-CDF (KR) map, which moves the sampler's per-step uniforms into Z;
+  OT assignments; CTMCs whose state remembers the start (an independent reviewer gave one that
+  maps uniform noise to `copy` deterministically); and iterative rectification as in ReDi. Such
+  couplings are only learnable when the source geometry is aligned with them (E4).
 
 ### (5) A deterministic coupling is learnable iff the source geometry is aligned with it (E4)
 
@@ -289,15 +306,18 @@ upper bound on the best total KL with K atoms.
 | source | total KL | achievable with K atoms | allocation @1k → @16k | leakage @1k → @16k |
 |---|---|---|---|---|
 | categorical K = 16 / 64 / 256 / 1024 / 4096 | 0.454 / 0.065 / 0.059 / 0.060 / 0.036 | 0.41 / 0.0054 / 3·10⁻⁴ / 2·10⁻⁵ / 10⁻⁶ | 0.28 / 0.065 / 0.055 / 0.049 / 0.028 → same ±6% | 0.17 / 0.000 / 0.011 / 0.022 / 0.021 → 0.17 / 0.000 / 0.003 / 0.011 / 0.008 |
-| Rademacher d = 4 / 6 / 8 / 10 / 12 | 0.659 / 0.123 / 0.055 / 0.052 / 0.025 | same as K = 2^d | 0.45 / 0.12 / 0.053 / 0.050 / 0.022 → same ±6% | 0.21 / 0.006 / 0.006 / 0.006 / 0.010 → 0.21 / 0.005 / 0.003 / 0.001 / 0.003 |
+| Rademacher d = 4 / 6 / 8 / 10 / 12 | 0.659 / 0.123 / 0.055 / 0.052 / 0.024 | same as K = 2^d | 0.45 / 0.12 / 0.053 / 0.050 / 0.022 → same ±6% | 0.21 / 0.006 / 0.006 / 0.006 / 0.010 → 0.21 / 0.005 / 0.003 / 0.001 / 0.003 |
 | Gaussian d = 2 / 4 / 8 | **0.018 / 0.027 / 0.027** | n/a | 0.003 / 0.004 / 0.005 → **0.0002 / 0.0003 / 0.0003** | 0.10 / 0.12 / 0.13 → 0.018 / 0.027 / 0.026 |
 
-* Finite sources settle their mass allocation in the first 1k steps and then barely move it. Their
-  total KL is 12× (K = 64) to more than 10⁴× (K = 4096) above what their atoms could achieve.
+* Finite sources settle their mass allocation in the first 1k steps and then barely move it. For
+  K ≥ 64 their total KL is 12× (K = 64) to more than 10⁴× (K = 4096) above what their atoms could
+  achieve. At K = 16 the gap is 1.1–1.6×, and two categorical seeds even beat the achievable value
+  by spreading atoms over codewords: it is an upper bound on the optimum, not a lower bound.
 * The Gaussian source gets the allocation right. Its residual allocation error (~2·10⁻⁴) is about
   half evaluation noise: the multinomial bias of a 2¹⁶-sample estimate over 16 modes is ≈1.1·10⁻⁴.
-  All its remaining error is boundary leakage, which keeps shrinking. On total KL it beats every
-  finite source except Rademacher d = 12, which ties it (0.025).
+  All its remaining error is boundary leakage, which keeps shrinking. On total KL, Gaussian d = 2
+  (0.018) beats every finite source. Rademacher d = 12 (0.024) beats Gaussian d = 4 and 8
+  (0.027).
 * Mechanism. For a continuous source with a density, the hard-partition mass P(z ∈ R_c(θ)) has a
   derivative equal to the flux of source density through the moving boundary ∂R_c, so mass flows
   under gradient descent. For an atomic source that quantity is piecewise constant. With soft
@@ -318,14 +338,16 @@ upper bound on the best total KL with K atoms.
 * **If the noise must be discrete, make it dense and ordered, aligned with the coupling.**
   Quantized uniforms driving an inverse-CDF sampler, or Hamming-OT-aligned tokens, are as learnable
   as continuous noise. Unordered symbols are not.
-* **A discrete teacher is a weak source of couplings.** Its reversed chain gives I(Z;X) = 0 at the
-  prior, and even an exact DFM teacher keeps only ~1.3 of ~8.6 bits.
+* **A marginalized discrete teacher is a weak source of couplings.** Its reversed chain gives
+  I(Z;X) = 0 at the prior, and even an exact DFM teacher keeps only ~1.3 of ~8.6 bits. Build
+  the coupling instead (OT, inverse-CDF, rectification), with aligned geometry.
 
 ## Limitations
 
 * Toy scale: L = 6, V = 4, one MLP architecture, fixed budgets (4k–16k steps). Effects that only
   appear at scale (attention, long sequences) are not tested.
-* E3b, E6, and E7b use one seed (E7b is deterministic up to Euler error ≤ 7·10⁻⁴ TV).
+* E3b and E6 use one seed. E7b is deterministic; its Euler discretization moves the reported
+  numbers by ≤ 0.007 nats and ≤ 0.005 bits.
 * E4 trains G on 3,276 pairs, so its deployed KL is dominated by memorization and the held-out law
   uses only 820 atoms for code/one-hot. We report held-out accuracy as the learnability metric.
   The FM teacher in E4 is imperfect on mix16 (target TV 0.36 vs a 0.18 sampling floor); an

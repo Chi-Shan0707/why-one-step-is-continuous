@@ -2,8 +2,9 @@
 
 **Why does every good one-step generator, including the discrete ones, get its randomness from
 continuous noise?** This repo answers that with a small mechanism study: 6 positions × 4 tokens =
-4,096 states, so every distribution is enumerated and the metrics are exact. The one exception is
-continuous noise, which uses large-sample estimates with < 4% bias.
+4,096 states, so every distribution is enumerated and the metrics are exact. The exceptions are
+continuous noise and discrete sources with more than 2¹⁶ atoms, which use large-sample estimates
+(bias ≤ 3.4%).
 
 **Short answer:** bits are not the problem, and neither is representation. With enough entropy,
 discrete noise can represent the data almost exactly. On an equal-weight mixture, well-separated
@@ -12,15 +13,15 @@ discrete atoms even fit *better* than Gaussian noise. What discrete noise lacks 
 
 | what one-step training needs | continuous noise | discrete noise | evidence |
 |---|---|---|---|
-| **enough bits**: H(Z) ≥ log₂ rank(p) | ✓ | ✓ for uniform tokens (✗ for masks: KL = TC exactly) | E1, E2, E3 |
-| **mass that can move between modes** | ✓ mass slides with decision boundaries | ✗ allocation flat from step 1k to 16k, 12×–10⁴× above what the atoms allow | E8 |
-| **a deterministic noise→data transport** to distill from | ✓ probability-flow ODE | ✗ no deterministic transport along a continuous path on a finite set, so teacher couplings are stochastic (I(Z;X) = 0 for the reversed chain, ~1.3 of 8.6 bits for an exact DFM teacher) | E7, E7b, E6 |
-| **geometry aligned with that transport**, to generalize to unseen z | ✓ | only if ordered (ordered 64-level ≈ continuous; shuffled = z-independent baseline) | E4 |
+| **enough bits**: ≥ rank(p) atoms (log₂K ≥ log₂ rank) | ✓ | ✓ for uniform tokens (✗ for masks: KL = TC exactly) | E1, E2, E3 |
+| **mass that can move between modes** | ✓ mass slides with decision boundaries | ✗ allocation flat from step 1k to 16k; for K ≥ 64 total KL 12×–10⁴× above what the atoms could achieve | E8 |
+| **a deterministic noise→data transport** to distill from | ✓ marginalizing velocities gives an ODE that cannot branch | ✗ marginalizing jump rates gives a branching CTMC, so teacher couplings are stochastic (I(Z;X) = 0 for the reversed chain, ~1.3 of 8.6 bits for an exact DFM teacher); deterministic ones must be constructed | E7, E7b, E6 |
+| **geometry aligned with that transport**, to generalize to unseen z | ✓ | only if aligned: order or Hamming structure (ordered 64-level ≈ continuous, Hamming-OT tokens ≈ Gaussian OT; shuffled or one-hot = z-independent baseline) | E4 |
 
 ![mass allocation](onestep-discrete/figures/e8_mass.png)
 
-*E8. Left: total KL of finite sources is far above what their K atoms could achieve (dashed);
-Gaussian is better. Right: each KL is split exactly into mass-allocation error and leakage. Atomic
+*E8. Left: for K ≥ 64, total KL of finite sources is far above what their K atoms could achieve
+(dashed, an upper bound on the optimum); the best Gaussian is better. Right: each KL is split exactly into mass-allocation error and leakage. Atomic
 sources fix their mode weights in the first 1k steps and never correct them. A Gaussian source drives
 allocation error to ~2e-4 (half of that is evaluation noise); its remaining error is boundary
 leakage, which keeps shrinking.*
@@ -30,8 +31,9 @@ leakage, which keeps shrinking.*
 *E7, computed exactly. The best one-step student distilled from a discrete teacher is limited by
 the information I(Z;X) in the teacher's coupling, not by the entropy of the noise. The reversed
 noising chain from its 12-bit prior carries I = 0, so the student is a product (KL = TC), as with
-no noise at all. An exact Discrete Flow Matching teacher (stars) keeps ~1.3 bits and the student
-is still far from the data. A deterministic (ODE-style) coupling would give KL → 0.*
+no noise at all. An exact Discrete Flow Matching teacher (stars) keeps ~1.3 of ~8.6 bits on
+mix16 and Markov (0.6 of 2 on copy), and the student is still far from the data. A deterministic
+(ODE-style) coupling would give KL → 0.*
 
 The full write-up, with every figure, table, caveat, and the hypothesis-by-hypothesis verdicts, is
 in **[REPORT.md](REPORT.md)**. The original study plan is
@@ -73,7 +75,7 @@ python run.py --data mix16 --source gaussian --d 4   # one config -> one JSON in
 python plots.py                           # every figure, from results/*.json only
 ```
 
-Requirements: Python ≥ 3.10, PyTorch ≥ 2.0 (CUDA optional), SciPy, Matplotlib.
+Requirements: Python ≥ 3.10, PyTorch ≥ 2.0 (CUDA optional), SciPy, Matplotlib (`pip install -r onestep-discrete/requirements.txt`).
 
 ## Layout
 
@@ -94,8 +96,9 @@ REPORT.md      the write-up
 
 ## Method notes
 
-* One generator (MLP, 3 layers, width 256) and one objective for every source:
-  −Σₓ w(x) log (1/N) Σₙ ∏ᵢ p_θ(xᵢ | zₙ) with N = 256 fresh samples per step. Only P_Z changes.
+* One generator (MLP, 3 layers, width 256) and, within each experiment, one objective for every
+  source: −Σₓ w(x) log (1/N) Σₙ ∏ᵢ p_θ(xᵢ | zₙ) (N = 256 in E3). Only P_Z changes. E4 uses
+  supervised regression on fixed pairs instead.
 * Every reported KL is exact by enumeration. The exceptions are sources with more than 2¹⁶ atoms
   and continuous sources, which use a 2¹⁶-sample MC estimate (median relative bias 0.2%, max
   3.4%, checked on 151 runs).

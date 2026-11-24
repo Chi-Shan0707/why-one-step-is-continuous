@@ -37,7 +37,7 @@ def posterior_marginals(p, t, ohx):
     return (post @ ohx).view(-1, D.L, D.V)
 
 
-def dfm_joint(p, s_max=12.0, ds=0.005):
+def dfm_joint(p, s_max=12.0, ds=0.0025, check_every=20):
     """Joint P(X_0, X_T) of the marginal CTMC, T = 1 - exp(-s_max). Returns it and a marginal check."""
     S = len(p)
     ohx = onehot(D.STATES.to(DEV), D.V)
@@ -57,7 +57,7 @@ def dfm_joint(p, s_max=12.0, ds=0.005):
             inflow = G.movedim(1 + i, -1).sum(-1).movedim(-1, 1 + i)  # sum over old value v
             dP += (inflow - out).reshape(S, S)
         P = P + ds * dP
-        if k % 500 == 0:  # the marginal of X_t must equal p_t
+        if k % check_every == 0:  # the marginal of X_t must equal p_t
             pt = log_joint_t(p, 1 - math.exp(-(k + 1) * ds), ohx).logsumexp(1).exp()  # time after the step
             worst_tv = max(worst_tv, D.tv(pt, P.sum(0)))
     return P, worst_tv
@@ -72,9 +72,12 @@ def main():
         p = D.make(fam).to(DEV)
         P, worst_tv = dfm_joint(p)
         kl, mi, hz = student_from_joint(p, P.clamp_min(1e-300).log())
+        P2, _ = dfm_joint(p, ds=0.005, check_every=10**9)  # coarser step: Euler error estimate
+        kl2, mi2, _ = student_from_joint(p, P2.clamp_min(1e-300).log())
         res = {"family": fam, "tc": D.total_correlation(p), "H_bits": D.entropy(p) / math.log(2),
                "student_kl": kl, "I_bits": mi, "HZ_bits": hz, "mass": P.sum().item(),
-               "final_tv_to_p": D.tv(p, P.sum(0)), "max_tv_marginal_vs_pt": worst_tv}
+               "final_tv_to_p": D.tv(p, P.sum(0)), "max_tv_marginal_vs_pt": worst_tv,
+               "euler_diff_kl": kl2 - kl, "euler_diff_I_bits": mi2 - mi}  # ds vs 2*ds
         print(res, flush=True)
         out.write_text(json.dumps(res, indent=1))
 
