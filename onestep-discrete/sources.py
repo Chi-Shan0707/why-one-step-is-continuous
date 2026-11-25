@@ -10,6 +10,7 @@ embedding table, and the rows of all factors are concatenated. This covers every
   onehot (d, m)      d factors, table = standardized one-hot of m levels (factorial, no order)
   categorical (K)    1 factor, table = K fixed random N(0, I_32) embeddings (no structure)
   constant           1 factor with a single all-zero row (deterministic source, K = 1)
+  frozen (d, K)      1 factor, table = K fixed N(0, I_d) samples: the Gaussian with its atoms exposed
 """
 import math
 from statistics import NormalDist
@@ -86,6 +87,8 @@ def make_source(kind, d=1, m=2, K=2, seed=0):
         e = torch.randn(K, CAT_DIM, generator=g)
         e = (e - e.mean(0)) / e.std(0, unbiased=False) if K > 1 else torch.zeros(1, CAT_DIM)
         return Source(f"categorical_K{K}", CAT_DIM, [e])
+    if kind == "frozen":
+        return Source(f"frozen_d{d}_K{K}", d, [torch.randn(K, d, generator=g)])
     if kind == "constant":
         return Source("constant", 1, [torch.zeros(1, 1)])
     raise ValueError(kind)
