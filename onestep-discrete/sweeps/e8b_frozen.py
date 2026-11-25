@@ -4,7 +4,7 @@ Frozen Gaussian: K samples of N(0, I_4) drawn once and kept, vs the resampled Ga
 use the same MC objective with N = 1024 fresh draws per step (from the K atoms, or from N(0, I)),
 so geometry, law and gradient estimator match; the only difference is whether the source has atoms.
 For K equal atoms under a deterministic map, the masses are multiples of 1/K and the best KL is
-achievable(K) of E8 (rounding p to the 1/K grid), the floor drawn in the figure.
+achievable(K) of E8 (rounding p to the 1/K grid). For soft outputs it is an upper bound on the best KL.
 """
 import json
 import sys

@@ -14,9 +14,9 @@ discrete atoms even fit *better* than Gaussian noise. What discrete noise lacks 
 | what one-step training needs | continuous noise | discrete noise | evidence |
 |---|---|---|---|
 | **enough bits**: ≥ rank(p) atoms (log₂K ≥ log₂ rank) | ✓ | ✓ for uniform tokens (✗ for masks: KL = TC exactly) | E1, E2, E3 |
-| **mass that can move between modes** | ✓ mass slides with decision boundaries | ✗ allocation flat from step 1k to 16k; for K ≥ 64 total KL 12×–10⁴× above what the atoms could achieve | E8 |
-| **a deterministic noise→data transport** to distill from | ✓ marginalizing velocities gives an ODE that cannot branch | ✗ marginalizing jump rates gives a branching CTMC, so teacher couplings are stochastic (I(Z;X) = 0 for the reversed chain, ~1.3 of 8.6 bits for an exact DFM teacher); deterministic ones must be constructed | E7, E7b, E6 |
-| **geometry aligned with that transport**, to generalize to unseen z | ✓ | only if aligned: order or Hamming structure (ordered 64-level ≈ continuous, Hamming-OT tokens ≈ Gaussian OT; shuffled or one-hot = z-independent baseline) | E4 |
+| **mass that can move between modes** | ✓ mass slides with decision boundaries | ✗ allocation flat from step 1k to 16k; a *frozen* Gaussian with K = 64 atoms stays 23× above its optimum while the resampled one converges | E8, E8b |
+| **a deterministic noise→data transport** to distill from | ✓ marginalizing velocities gives an ODE that cannot branch | ✗ marginalizing jump rates gives a branching CTMC, so teacher couplings are stochastic (I(Z;X) = 0 for the reversed chain, ~1.3 of 8.6 bits for an exact DFM teacher); deterministic ones must be constructed. The student's error is bounded by E_z TC(X\|Z=z) (Prop. A) | E7, E7b, E7c, E6 |
+| **geometry aligned with that transport**, to generalize to unseen z | ✓ | only if aligned: order or Hamming structure (ordered 64-level ≈ continuous, Hamming-OT tokens ≈ Gaussian OT; shuffled or one-hot = z-independent baseline; their neighbor agreement is at chance) | E4, E4b |
 
 ![mass allocation](onestep-discrete/figures/e8_mass.png)
 
@@ -28,12 +28,13 @@ leakage, which keeps shrinking.*
 
 ![teacher coupling](onestep-discrete/figures/e7_teacher_coupling.png)
 
-*E7, computed exactly. The best one-step student distilled from a discrete teacher is limited by
-the information I(Z;X) in the teacher's coupling, not by the entropy of the noise. The reversed
+*E7, computed exactly. The best one-step student distilled from a teacher is limited by the
+coupling's conditional dependence E_z TC(X|Z=z) (bottom row, Proposition A), not by the entropy of
+the noise. The reversed
 noising chain from its 12-bit prior carries I = 0, so the student is a product (KL = TC), as with
 no noise at all. An exact Discrete Flow Matching teacher (stars) keeps ~1.3 of ~8.6 bits on
-mix16 and Markov (0.6 of 2 on copy), and the student is still far from the data. A deterministic
-(ODE-style) coupling would give KL → 0.*
+mix16 and Markov (0.6 of 2 on copy), and the student is still far from the data. A continuous FM teacher with
+ODE + argmax (diamonds, measured) is deterministic, and its student reaches 0.02 nats.*
 
 The full write-up, with every figure, table, caveat, and the hypothesis-by-hypothesis verdicts, is
 in **[REPORT.md](REPORT.md)**. The original study plan is
@@ -62,11 +63,14 @@ in **[REPORT.md](REPORT.md)**. The original study plan is
 | E2 | k-step masked diffusion, exact laws | `sweeps/e2_steps.py` | 5 min |
 | E3 | source sweep, population and n = 500 | `sweeps/e3_sources.py`, `sweeps/e3_budget.py` | ~3 h |
 | E4 | coupling learnability (ODE / OT / VAE / KR × source) | `sweeps/e4_coupling.py` | 40 min |
+| E4b | neighbor agreement ν of each E4 coupling | `sweeps/e4b_neighbors.py` | 10 min |
 | E5 | do correlated positions flip together? (toy) | `sweeps/e5_boundaries.py` | 10 min |
 | E6 | MC marginal likelihood vs samples per step | `sweeps/e6_nscaling.py` | 25 min |
 | E7 | information in a discrete teacher's coupling (exact) | `sweeps/e7_teacher_coupling.py` | 1 min |
 | E7b | exact Discrete Flow Matching teacher coupling | `sweeps/e7b_dfm.py` | 15 min |
+| E7c | continuous ODE teacher in the same harness | `sweeps/e7c_ode_teacher.py` | 20 min |
 | E8 | can mass move between modes? | `sweeps/e8_mass.py` | 40 min |
+| E8b | frozen vs resampled Gaussian: is atomicity alone enough? | `sweeps/e8b_frozen.py` | 5 min |
 
 ```bash
 cd onestep-discrete

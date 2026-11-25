@@ -113,8 +113,9 @@ def teacher(kind, p, fam, seed):
     """The FM ('fm') or VAE ('vae') teacher of (fam, seed), trained once and cached on disk."""
     f = OUT / f"{kind}_{fam}_s{seed}.pt"
     if not f.exists():
+        OUT.mkdir(parents=True, exist_ok=True)
         torch.save({"fm": train_fm, "vae": train_vae}[kind](p, seed), f)
-    return torch.load(f, weights_only=False)
+    return torch.load(f, map_location=DEV, weights_only=False)
 
 
 # ---------- building pairs ----------

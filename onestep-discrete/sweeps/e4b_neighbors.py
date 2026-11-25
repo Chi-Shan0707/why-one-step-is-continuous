@@ -3,6 +3,8 @@
 For each E4 cell, rebuild its M = 4096 (z, x) pairs, find each z's nearest other z in the geometry
 G sees (Euclidean on G's input; ties broken at random), and let nu = mean fraction of positions on
 which the two targets agree. No training: the held-out accuracy is read from E4's JSONs.
+`pairs_match_e4` compares the target histogram with E4's; it checks the pairing only where x is a
+function of z (ode, kr), not for vae, whose z is encoded from x.
 """
 import json
 import sys
@@ -16,7 +18,9 @@ from e4_coupling import CELLS, DEV, OUT, make_pairs, source_input, target_tv, te
 
 
 def nu(z, x, g):
-    d = torch.cdist(z, z) + 1e-6 * torch.rand(len(z), len(z), generator=g, device=DEV)
+    z = z.double()  # exact distances, so that ties are real ties and the jitter breaks them at random
+    d = torch.cdist(z, z, compute_mode="donot_use_mm_for_euclid_dist")
+    d = d + 1e-9 * torch.rand(d.shape, generator=g, device=DEV, dtype=d.dtype)
     nn = d.fill_diagonal_(float("inf")).argmin(1)
     return (x == x[nn]).float().mean().item(), (x == x[nn]).all(1).float().mean().item()
 

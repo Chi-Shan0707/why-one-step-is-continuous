@@ -246,28 +246,95 @@ def fig_e7():
     rs = [r for r in load("e7/*.json") if "rows" in r]
     if not rs:
         return
-    fig, axes = plt.subplots(1, len(rs), figsize=(4.2 * len(rs), 3.6), squeeze=False)
-    for ax, r in zip(axes[0], rs):
-        for c, kind, label in [(SLOTS[0], "uniform", "uniform-noise teacher (prior H(Z) = 12 bits)"),
-                               (SLOTS[1], "mask", "masking teacher (prior H(Z) = 0 bits)")]:
-            rows = [x for x in r["rows"] if x["kernel"] == kind]
-            ax.plot([x["I_bits"] for x in rows], fl([x["kl"] for x in rows]), "-o", color=c, label=label)
+    fig, axes = plt.subplots(2, len(rs), figsize=(4.2 * len(rs), 7.2), squeeze=False)
+    for top, bot, r in zip(axes[0], axes[1], rs):
+        pts = [(SLOTS[0], "-o", "uniform-noise teacher (prior H(Z) = 12 bits)",
+                [x for x in r["rows"] if x["kernel"] == "uniform"]),
+               (SLOTS[1], "-o", "masking teacher (prior H(Z) = 0 bits)",
+                [x for x in r["rows"] if x["kernel"] == "mask"])]
         dfm = R / "e7" / f"{r['family']}_dfm.json"
         if dfm.exists():
-            d = json.loads(dfm.read_text())
-            ax.plot(d["I_bits"], fl(d["student_kl"]), "*", ms=14, color=SLOTS[2],
-                    label="DFM marginal-CTMC teacher from its uniform prior")
-        ax.axhline(r["tc"], color=INK2, ls=":", lw=1)
-        ax.set(yscale="log", xlabel="I(Z; X) of the teacher coupling  [bits]",
-               title=f"{r['family']} (dotted: TC = {r['tc']:.2f})")
+            pts.append((SLOTS[2], "*", "DFM marginal-CTMC teacher from its uniform prior", [json.loads(dfm.read_text())]))
+        ode = load(f"e7/{r['family']}_ode_s*.json")
+        if ode:  # KL to the teacher's own law, as E7 reports KL to the coupling's X-marginal
+            pts.append((SLOTS[3], "D", "continuous ODE + argmax teacher, *trained* student, KL to the teacher's "
+                        "law (3 seeds; regression-optimal student: 0)", ode))
+        for c, fmt, label, rows in pts:
+            ms = 14 if fmt == "*" else 6
+            top.plot([x["I_bits"] for x in rows], fl([x["kl_to_pi"] for x in rows]), fmt, color=c, ms=ms, label=label)
+            bot.plot([x["bound"] for x in rows], [x["kl_to_pi"] for x in rows], fmt, color=c, ms=ms)
+        top.axhline(r["tc"], color=INK2, ls=":", lw=1)
+        top.set(yscale="log", xlabel="I(Z; X) of the teacher coupling  [bits]",
+                title=f"{r['family']} (dotted: TC = {r['tc']:.2f})")
+        bot.plot([0, r["tc"]], [0, r["tc"]], ":", color=INK2, lw=1)
+        bot.set(xlabel="E_z TC(X | Z=z) = TC - [sum_i I(Z;X_i) - I(Z;X)]  [nats]")
     axes[0][0].set_ylabel("KL of best regression student")
-    fig.legend(*axes[0][0].get_legend_handles_labels(), loc="lower center", ncol=3, fontsize=9,
-               bbox_to_anchor=(0.5, -0.1))
-    fig.suptitle("E7: one-step students distilled from discrete teachers (exact). Curves: forward joint at noise "
-                 f"level alpha; alpha = 0 is the reversed chain from its prior. ({FLOOR_NOTE})", y=1.04)
+    axes[1][0].set_ylabel("KL of best regression student  [nats]")
+    handles = {lab: h for ax in axes[0] for h, lab in zip(*ax.get_legend_handles_labels())}
+    fig.legend(handles.values(), handles.keys(), loc="lower center", ncol=2, fontsize=9,
+               bbox_to_anchor=(0.5, -0.06))
+    fig.suptitle("E7: one-step students distilled from teacher couplings (discrete: exact). Curves: forward joint "
+                 f"at noise level alpha. Top: vs I ({FLOOR_NOTE}). Bottom: vs Proposition A's bound (dotted: y = x).",
+                 y=1.0)
+    fig.tight_layout()
     save(fig, "e7_teacher_coupling.png")
 
 
+def fig_e8b():
+    rs = load("e8b/zipf16_*.json")
+    if not rs:
+        return
+    floors = {int(k): v for k, v in json.loads((R / "e8b" / "floors.json").read_text()).items()}
+    gauss = [r for r in load("e8/zipf16_pop_gaussian_d4_*.json")]
+    Ks = sorted(floors)
+    fig, (a1, a2) = plt.subplots(1, 2, figsize=(11.5, 3.9))
+    by_k = {K: [r["final"]["kl_alloc"] for r in rs if r["K"] == K] for K in Ks}
+    y = fl([np.mean(by_k[K]) for K in Ks])
+    a1.errorbar(Ks, y, yerr=[y - fl([min(by_k[K]) for K in Ks]), fl([max(by_k[K]) for K in Ks]) - y],
+                fmt="-o", color=SLOTS[1], elinewidth=1, label="frozen Gaussian: K fixed draws of N(0, I_4)")
+    a1.axhline(fl(np.mean([r["final"]["kl_alloc"] for r in gauss])), color=SLOTS[2], lw=1.5,
+               label="resampled Gaussian N(0, I_4) (E8)")
+    a1.plot(Ks[:1], [floors[Ks[0]]], "x", ms=9, color=INK2,
+            label="best with K atoms, p rounded to 1/K (< 1e-4 for K >= 1024)")
+    a1.set(xscale="log", yscale="log", xlabel="number of atoms K", ylabel="allocation error after 16k steps  [nats]",
+           title="same geometry, law and MC estimator; only atoms differ")
+    a1.legend(fontsize=8)
+    for c, K in zip([SLOTS[1], SLOTS[3], SLOTS[0]], Ks):
+        sub = [r for r in rs if r["K"] == K]
+        a2.plot([t["step"] for t in sub[0]["traj"]], fl(np.mean([[t["kl_alloc"] for t in r["traj"]] for r in sub], 0)),
+                color=c, label=f"frozen, K = {K}")
+    a2.plot([t["step"] for t in gauss[0]["traj"]], fl(np.mean([[t["kl_alloc"] for t in r["traj"]] for r in gauss], 0)),
+            color=SLOTS[2], label="resampled")
+    a2.set(yscale="log", xlabel="training step", ylabel="allocation error  [nats]", title="during training (mean of 3 seeds)")
+    a2.legend(fontsize=8)
+    fig.suptitle("E8b: zipf16, MC objective with N = 1024 for both (error bars: min-max over 3 seeds)", y=1.02)
+    fig.tight_layout()
+    save(fig, "e8b_frozen.png")
+
+
+def fig_e4b():
+    f = R / "e4b.json"
+    if not f.exists():
+        return
+    rows = json.loads(f.read_text())
+    fig, axes = plt.subplots(1, 2, figsize=(10, 3.9), sharey=True)
+    for ax, fam in zip(axes, ["markov", "mix16"]):
+        for src, coupling in E4_CELLS:
+            sub = [r for r in rows if r["family"] == fam and (r["source"], r["coupling"]) == (src, coupling)]
+            x, y = np.mean([r["nu_tok"] for r in sub]), np.mean([r["test_tok_acc"] for r in sub])
+            ax.plot(x, y, "o", ms=8, color=SLOTS[E4_GROUP[src]])
+            if y > 0.5 and src != "quant":  # geometry-free cells cluster at chance; quant/kr sits on unif/kr
+                ax.annotate("unif, quant/kr" if src == "unif" else f"{src}/{coupling}", (x, y),
+                            xytext=(5, -11), textcoords="offset points", fontsize=7)
+        ax.plot([0.2, 1], [0.2, 1], ":", color=INK2, lw=1)
+        ax.set(xlim=(0.2, 1), ylim=(0.2, 1), title=fam, xlabel="neighbor agreement nu (token level)")
+    axes[0].set_ylabel("held-out token accuracy (E4)")
+    axes[0].legend(handles=[Patch(color=SLOTS[k], label=lab) for k, lab in enumerate(E4_LEGEND)], fontsize=8)
+    fig.suptitle("E4b: learnability vs the coupling's neighbor agreement in the source geometry "
+                 "(mean of 3 seeds; dotted: y = x)", y=1.02)
+    save(fig, "e4b_neighbors.png")
+
+
 if __name__ == "__main__":
-    for f in [fig_e1, fig_e2, fig_e3, fig_e4, fig_e6, fig_e7, fig_e8]:
+    for f in [fig_e1, fig_e2, fig_e3, fig_e4, fig_e6, fig_e7, fig_e8, fig_e8b, fig_e4b]:
         f()

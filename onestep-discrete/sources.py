@@ -10,7 +10,8 @@ embedding table, and the rows of all factors are concatenated. This covers every
   onehot (d, m)      d factors, table = standardized one-hot of m levels (factorial, no order)
   categorical (K)    1 factor, table = K fixed random N(0, I_32) embeddings (no structure)
   constant           1 factor with a single all-zero row (deterministic source, K = 1)
-  frozen (d, K)      1 factor, table = K fixed N(0, I_d) samples: the Gaussian with its atoms exposed
+  frozen (d, K)      1 factor, table = K fixed N(0, I_d) draws, not re-standardized: the Gaussian with
+                     its atoms exposed
 """
 import math
 from statistics import NormalDist
