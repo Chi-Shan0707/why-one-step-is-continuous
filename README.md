@@ -37,7 +37,8 @@ mix16 and Markov (0.6 of 2 on copy), and the student is still far from the data.
 ODE + argmax (diamonds, measured) is deterministic, and its student reaches 0.02 nats.*
 
 The full write-up, with every figure, table, caveat, and the hypothesis-by-hypothesis verdicts, is
-in **[REPORT.md](REPORT.md)**. The original study plan is
+in **[REPORT.md](REPORT.md)**. A self-contained, typeset version is **[report.html](report.html)** (download and open
+locally; math pre-rendered with KaTeX, no network needed). The original study plan is
 [one_step_discrete_plan.md](one_step_discrete_plan.md).
 
 ## Verdicts on the plan's hypotheses
