@@ -109,6 +109,14 @@ def train_vae(p, seed, steps=10000):
     return fit(VAE().to(DEV), x, x, steps, loss_fn=vae_loss)
 
 
+def teacher(kind, p, fam, seed):
+    """The FM ('fm') or VAE ('vae') teacher of (fam, seed), trained once and cached on disk."""
+    f = OUT / f"{kind}_{fam}_s{seed}.pt"
+    if not f.exists():
+        torch.save({"fm": train_fm, "vae": train_vae}[kind](p, seed), f)
+    return torch.load(f, weights_only=False)
+
+
 # ---------- building pairs ----------
 
 def all_codes():
@@ -227,9 +235,9 @@ def main(families=("mix16", "markov"), seeds=(0, 1, 2), g_steps=4000):
                     continue
                 t0 = time.time()
                 if coupling == "ode" and "fm" not in cache:
-                    cache["fm"] = train_fm(p, seed)
+                    cache["fm"] = teacher("fm", p, fam, seed)
                 if coupling == "vae" and "vae" not in cache:
-                    cache["vae"] = train_vae(p, seed)
+                    cache["vae"] = teacher("vae", p, fam, seed)
                 z_tr, x_tr, z_te, x_te = make_pairs(src, coupling, p, seed, cache)
                 torch.manual_seed(seed)
                 G = MLP(IN_DIM[src]).to(DEV)
