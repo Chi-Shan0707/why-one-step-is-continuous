@@ -39,15 +39,23 @@ def forward_joint(p, logK, Vz):
 def student_from_joint(p, logj):
     """Regression-optimal one-step student for the coupling exp(logj) (Z, X).
 
-    Returns KL(p || p_G), I(Z;X) bits and H(Z) bits, where p_G = sum_z pi(z) prod_i pi(x_i | z)."""
+    p_G = sum_z pi(z) prod_i pi(x_i | z). Returns KL(p || p_G), I(Z;X), sum_i I(Z;X_i), H(Z) (bits)
+    and the bound KL(pi_X || p_G) <= E_z TC(X | Z=z) = TC(X) - [sum_i I(Z;X_i) - I(Z;X)] (nats)."""
     ohx = onehot(D.STATES.to(DEV), D.V)
     logpz, logpx = logj.logsumexp(1), logj.logsumexp(0)
     post = (logj - logpz[:, None]).exp()                              # pi(x | z)
-    logq = (post @ ohx).clamp_min(1e-300).log()                       # (Z, L*V) log pi(x_i | z)
+    q = post @ ohx                                                    # (Z, L*V) pi(x_i | z)
+    logq = q.clamp_min(1e-300).log()
     logpg = (logq @ ohx.T + logpz[:, None]).logsumexp(0)
     mi = (logj.exp() * (logj - logpz[:, None] - logpx[None])).nansum().item()
-    hz = -(logpz.exp() * logpz).nansum().item()
-    return D.kl(p, logpg), mi / math.log(2), hz / math.log(2)
+    pz, px = logpz.exp(), logpx.exp()
+    h_sites_z = -(pz[:, None] * q * logq).sum().item()                # sum_i H(X_i | Z)
+    h_sites = -(D.marginals(px) * D.marginals(px).clamp_min(1e-300).log()).sum().item()
+    mi_sites = h_sites - h_sites_z
+    hz = -(pz * logpz).nansum().item()
+    tc = D.total_correlation(px)
+    return {"kl": D.kl(p, logpg), "kl_to_pi": D.kl(px, logpg), "bound": tc - mi_sites + mi,
+            "I_bits": mi / math.log(2), "I_sites_bits": mi_sites / math.log(2), "HZ_bits": hz / math.log(2)}
 
 
 def student_law(p, logK, Vz):
@@ -70,8 +78,7 @@ def main():
         rows = []
         for kind in ["uniform", "mask"]:
             for a in alphas:
-                kl, mi, hz = student_law(p, *kernel(kind, a))
-                rows.append({"kernel": kind, "alpha": a, "kl": kl, "I_bits": mi, "HZ_bits": hz})
+                rows.append({"kernel": kind, "alpha": a, **student_law(p, *kernel(kind, a))})
                 print(fam, rows[-1], flush=True)
         (OUT / f"{fam}.json").write_text(json.dumps(
             {"family": fam, "tc": D.total_correlation(p), "H_bits": D.entropy(p) / math.log(2),

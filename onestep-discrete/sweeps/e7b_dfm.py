@@ -71,11 +71,12 @@ def main():
             continue
         p = D.make(fam).to(DEV)
         P, worst_tv = dfm_joint(p)
-        kl, mi, hz = student_from_joint(p, P.clamp_min(1e-300).log())
+        st = student_from_joint(p, P.clamp_min(1e-300).log())
         P2, _ = dfm_joint(p, ds=0.005, check_every=10**9)  # coarser step: Euler error estimate
-        kl2, mi2, _ = student_from_joint(p, P2.clamp_min(1e-300).log())
+        st2 = student_from_joint(p, P2.clamp_min(1e-300).log())
+        kl, mi, kl2, mi2 = st["kl"], st["I_bits"], st2["kl"], st2["I_bits"]
         res = {"family": fam, "tc": D.total_correlation(p), "H_bits": D.entropy(p) / math.log(2),
-               "student_kl": kl, "I_bits": mi, "HZ_bits": hz, "mass": P.sum().item(),
+               **st, "mass": P.sum().item(),
                "final_tv_to_p": D.tv(p, P.sum(0)), "max_tv_marginal_vs_pt": worst_tv,
                "euler_diff_kl": kl2 - kl, "euler_diff_I_bits": mi2 - mi}  # ds vs 2*ds
         print(res, flush=True)
